@@ -341,8 +341,12 @@
             for (let i = 0; i < 5; i++) {
                 try {
                     // --- 替換第 285 行開始的 fetch 區塊 ---
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(state.apiKey)}`;
-                    console.log("正在嘗試發送請求至:", url); // 可以在 Console 看到真實網址
+                    // --- 建議替換第 285 行開始的 fetch 區塊 ---
+                    const userApiKey = state.apiKey.trim(); // 確保沒有空格
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${userApiKey}`;
+
+                    // 資管系除錯心法：在發出前先列印出來檢查
+                    console.log("正在嘗試發送請求，完整網址為:", url);
 
                     const response = await fetch(url, {
                         method: 'POST',
