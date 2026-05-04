@@ -343,7 +343,7 @@
                     // --- 替換第 285 行開始的 fetch 區塊 ---
                     // --- 建議替換第 285 行開始的 fetch 區塊 ---
                     // 請直接複製這兩行，替換掉原本的 url 定義與印出語句
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(userApiKey)}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${encodeURIComponent(state.apiKey)}`;
                     console.log("Debug - 完整發送網址:", url);
 
                     // 資管系除錯心法：在發出前先列印出來檢查
@@ -362,6 +362,10 @@
                             generationConfig: { responseMimeType: "application/json" }
                         })
                     });
+                    if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API 錯誤 ${response.status}: ${errorText}`);
+                    }
                     if (!response.ok) throw new Error("AI 伺服器忙碌，正在重試...");
                     const result = await response.json();
                     let raw = result.candidates[0].content.parts[0].text;
