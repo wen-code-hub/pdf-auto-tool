@@ -340,11 +340,13 @@
             
             for (let i = 0; i < 5; i++) {
                 try {
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${state.apiKey}`;
-                    console.log("偵錯 - 最終發出的網址:", url); // 這一行可以幫你在 Console 檢查網址是否完整
+                    // --- 替換第 285 行開始的 fetch 區塊 ---
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(state.apiKey)}`;
+                    console.log("正在嘗試發送請求至:", url); // 可以在 Console 看到真實網址
+
                     const response = await fetch(url, {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             contents: [{
                                 parts: [
