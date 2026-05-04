@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 課程補助專案自動核定系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Chosen Palette: Slate & Teal (Stone-50 background, Teal-600 accents) -->
+    <!-- Application Structure Plan:
+         這是一套設計為「高效率辦公」的資料處理工具。結構分為：
+         1. 左側控制列：固定放置「Excel 範本上傳」與「PDF 資料上傳」區塊，確保使用者隨時可以處理下一份檔案。
+         2. 右側工作區：上方為「即時校對區」，AI 辨識後的結果會填入此處，供使用者在加入清單前進行最後修改。
+         3. 右側下方：為「批次暫存清單」，展示目前所有已成功辨識並準備匯出的資料筆數。
+         這種架構特別適合需要連續處理數十份 PDF 申請表，最後再一次匯出成單一 Excel 總表的行政任務。 -->
+    <!-- Visualization & Content Choices:
+         - 使用 Chart.js 顯示「批次處理容量」，讓使用者對目前的任務負擔有視覺感。
+         - 表格採用 Sticky Header，方便處理欄位較多的 Excel 範本。
+         - 自定義映射邏輯：自動將「經費項目」中的「材料費」與「其他人事支出」進行分離加總。 -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
+    <style>
+        body { background-color: #f8fafc; color: #1e293b; font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; }
+        .drop-zone { border: 2px dashed #cbd5e1; transition: all 0.2s ease; background: #ffffff; }
+        .drop-zone.active { border-color: #0d9488; background-color: #f0fdfa; transform: scale(1.01); }
+        .scroll-custom::-webkit-scrollbar { width: 6px; }
+        .scroll-custom::-webkit-scrollbar-track { background: #f1f5f9; }
+        .scroll-custom::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .animate-slide-up { animation: slideUp 0.4s ease-out; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- 導覽列 -->
+    <nav class="bg-white border-b border-slate-200 py-4 px-6 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <div class="bg-teal-600 p-2 rounded-lg text-white text-xl">📊</div>
+                <div>
+                    <h1 class="text-lg font-bold text-slate-800 leading-tight">課程補助專案自動整理工具</h1>
+                    <p class="text-[10px] text-slate-400 font-mono">v3.5 - 專業行政自動化版本</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="hidden md:flex bg-teal-50 px-4 py-1.5 rounded-full border border-teal-100 items-center">
+                    <span class="text-xs font-bold text-teal-700 mr-2">累計資料:</span>
+                    <span id="record-count" class="text-sm font-black text-teal-800">0</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- 左側：檔案控制區 -->
+        <div class="lg:col-span-4 space-y-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+                <h2 class="text-md font-bold text-slate-700 flex items-center">
+                    <span class="mr-2">📁</span> 上傳與設定
+                </h2>
+
+                <!-- 範本上傳 -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">1. 載入核定表 Excel 範本</label>
+                    <div id="template-drop" class="drop-zone rounded-xl p-5 text-center cursor-pointer hover:bg-slate-50">
+                        <div class="text-3xl mb-1">📋</div>
+                        <p id="template-name" class="text-xs text-slate-400">點擊載入表頭結構</p>
+                        <input type="file" id="template-input" class="hidden" accept=".xlsx,.xls">
+                    </div>
+                </div>
+
+                <!-- 原始資料上傳 -->
+                <div class="pt-4 border-t border-slate-100">
+                    <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">2. 上傳申請表 (PDF/圖片)</label>
+                    <div id="source-drop" class="drop-zone rounded-xl p-8 text-center cursor-pointer hover:bg-slate-50">
+                        <div class="text-4xl mb-2">📄</div>
+                        <p id="source-name" class="text-xs text-slate-400">拖放當前要辨識的檔案</p>
+                        <input type="file" id="source-input" class="hidden" accept="image/*,application/pdf">
+                    </div>
+                </div>
+
+                <button id="btn-process" disabled class="w-full py-4 bg-slate-200 text-slate-400 font-black rounded-xl transition-all cursor-not-allowed text-lg shadow-inner">
+                    執行 AI 自動對應
+                </button>
+            </div>
+
+            <!-- 作業統計圖表 -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h3 class="font-bold text-slate-700 text-sm mb-4">批次處理狀態</h3>
+                <div class="chart-container h-[180px]">
+                    <canvas id="batchChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側：校對與批次清單 -->
+        <div class="lg:col-span-8 space-y-6">
+            
+            <!-- 校對工作區 -->
+            <div id="mapping-card" class="bg-white rounded-2xl shadow-lg border border-teal-100 flex flex-col min-h-[450px] overflow-hidden">
+                <div class="bg-teal-600 px-6 py-3 flex justify-between items-center">
+                    <h2 class="text-white font-bold flex items-center">
+                        <span class="mr-2">⚡</span> AI 辨識與人工校對區
+                    </h2>
+                    <div id="loader" class="hidden h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                </div>
+
+                <!-- 錯誤提示 -->
+                <div id="error-alert" class="hidden m-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start">
+                    <span class="mr-2">⚠️</span>
+                    <div id="error-message"></div>
+                </div>
+
+                <!-- 佔位視圖 -->
+                <div id="placeholder-view" class="flex-grow flex flex-col items-center justify-center text-slate-300 space-y-4 py-20">
+                    <div class="text-7xl">🤖</div>
+                    <p class="text-slate-400 font-medium text-center">請先上傳 Excel 範本與申請檔案<br><span class="text-xs text-slate-300 font-normal mt-2 block">上傳完成後點擊「執行 AI 自動對應」按鈕</span></p>
+                </div>
+
+                <!-- 結果視圖 -->
+                <div id="result-view" class="hidden flex-grow flex flex-col p-6 animate-slide-up">
+                    <div class="flex-grow overflow-x-auto scroll-custom border border-slate-100 rounded-xl mb-6">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-slate-50 text-[10px] text-slate-500 border-b border-slate-100 sticky top-0">
+                                <tr>
+                                    <th class="p-3 font-bold">目標 Excel 欄位</th>
+                                    <th class="p-3 font-bold">AI 填入結果 (可編輯)</th>
+                                    <th class="p-3 text-center">來源狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mapping-body" class="text-sm"></tbody>
+                        </table>
+                    </div>
+
+                    <div class="flex justify-end space-x-3">
+                        <button id="btn-cancel" class="px-6 py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-all">放棄此筆</button>
+                        <button id="btn-add" class="px-10 py-3 bg-teal-600 text-white font-black rounded-xl hover:bg-teal-700 shadow-xl shadow-teal-100 transition-all">
+                            確認加入批次清單
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 歷史暫存清單 -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800">已準備匯出資料</h2>
+                        <p class="text-[10px] text-slate-400 mt-1">目前存於瀏覽器暫存中的紀錄，匯出後可直接存為 Excel</p>
+                    </div>
+                    <button id="btn-export" disabled class="px-6 py-2 bg-stone-100 text-stone-400 font-bold rounded-lg cursor-not-allowed transition-all">
+                        📥 匯出完整 Excel
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto scroll-custom border border-slate-50 rounded-lg max-h-[350px]">
+                    <table class="w-full text-[10px] text-left">
+                        <thead class="bg-slate-50 text-slate-400 border-b border-slate-100">
+                            <tr id="hist-head"><th>等待載入表頭範本...</th></tr>
+                        </thead>
+                        <tbody id="hist-body" class="divide-y divide-slate-50 text-slate-600">
+                            <tr><td colspan="100%" class="p-12 text-center text-slate-300 italic">清單目前為空，請開始辨識並加入資料</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- 全域狀態管理 ---
+        const state = {
+            sourceFile: null,
+            templateHeaders: [],
+            processedRecords: [],
+            aiResult: null,
+            flattenedData: {},
+            apiKey: "" 
+        };
+
+        const elements = {
+            tempIn: document.getElementById('template-input'),
+            tempName: document.getElementById('template-name'),
+            srcIn: document.getElementById('source-input'),
+            srcName: document.getElementById('source-name'),
+            btnProcess: document.getElementById('btn-process'),
+            btnAdd: document.getElementById('btn-add'),
+            btnCancel: document.getElementById('btn-cancel'),
+            btnExport: document.getElementById('btn-export'),
+            mappingBody: document.getElementById('mapping-body'),
+            placeholder: document.getElementById('placeholder-view'),
+            resultView: document.getElementById('result-view'),
+            loader: document.getElementById('loader'),
+            recordCount: document.getElementById('record-count'),
+            histHead: document.getElementById('hist-head'),
+            histBody: document.getElementById('hist-body'),
+            errorAlert: document.getElementById('error-alert'),
+            errorMessage: document.getElementById('error-message')
+        };
+
+        // --- 核心工具：資料清理與扁平化 ---
+        const normalize = (str) => String(str || "").replace(/[\s\(\)\uff08\uff09\n\r]/g, "").toLowerCase();
+
+        const flattenObject = (obj, prefix = '') => {
+            let res = {};
+            for (let k in obj) {
+                let v = obj[k];
+                let nk = prefix ? `${prefix}_${k}` : k;
+                if (v && typeof v === 'object' && !Array.isArray(v)) {
+                    Object.assign(res, flattenObject(v, nk));
+                    Object.assign(res, flattenObject(v, '')); 
+                } else {
+                    res[nk] = v;
+                    res[k] = v;
+                }
+            }
+            return res;
+        };
+
+        const showError = (msg) => {
+            elements.errorMessage.innerText = msg;
+            elements.errorAlert.classList.remove('hidden');
+            elements.loader.classList.add('hidden');
+            setTimeout(() => elements.errorAlert.classList.add('hidden'), 10000);
+        };
+
+        const checkReady = () => {
+            if (state.sourceFile && state.templateHeaders.length > 0) {
+                elements.btnProcess.disabled = false;
+                elements.btnProcess.className = "w-full py-4 bg-teal-600 text-white font-black rounded-xl hover:bg-teal-700 shadow-xl shadow-teal-100 cursor-pointer text-lg transition-all";
+            } else {
+                elements.btnProcess.disabled = true;
+                elements.btnProcess.className = "w-full py-4 bg-slate-200 text-slate-400 font-black rounded-xl cursor-not-allowed text-lg shadow-inner";
+            }
+        };
+
+        // --- 中原大學核定表專屬映射邏輯 ---
+        const getMappedValue = (header, flat) => {
+            const h = header.trim();
+            const nh = normalize(h);
+            const sourceFileName = state.sourceFile ? state.sourceFile.name : "";
+
+            // 1. 序號
+            if (nh === "序號") return (state.processedRecords.length + 1).toString();
+
+            // 2. 歸檔名稱 (格式: 序號.計畫名稱-教師老師)
+            if (nh === "歸檔名稱") {
+                const teacher = flat["申請教師"] || flat["申請人"] || "教師";
+                const course = flat["課程名稱"] || flat["計畫名稱"] || "計畫";
+                return `${state.processedRecords.length + 1}.${course}-${teacher}老師`;
+            }
+
+            // 3. 類型 (自動判定標題關鍵字)
+            if (nh === "類型") {
+                const title = normalize(flat["標題"] || flat["文件名稱"] || "");
+                return title.includes("程式設計") ? "程式設計" : "";
+            }
+
+            // 4. 定義欄位映射字典 (處理範例中的換行或名稱差異)
+            const dict = {
+                "學院": ["所屬學院", "學院", "工學院"],
+                "系所": ["所屬學系", "學系", "系所", "土木工程學系"],
+                "申請人": ["申請教師", "申請人", "授課教師", "教師姓名"],
+                "人事代碼": ["人事代碼", "工號", "代碼"],
+                "課程代碼": ["課程代碼", "課號"],
+                "計畫名稱": ["課程名稱", "計畫名稱"],
+                "合計": ["核定金額合計", "合計", "總金額", "核定金額", "申請金額合計"],
+                "校外信箱申請人": ["Email", "E-mail", "電子郵件", "校外信箱"]
+            };
+
+            for (let [key, variants] of Object.entries(dict)) {
+                if (normalize(key) === nh) {
+                    for (let v of variants) {
+                        if (flat[v] !== undefined && flat[v] !== null) return flat[v];
+                    }
+                }
+            }
+
+            // 5. 經費拆分邏輯 (核定人事費 vs 核定業務費)
+            const details = flat["經費明細"] || [];
+            if (Array.isArray(details)) {
+                if (nh === "核定人事費") {
+                    const val = details.filter(i => !normalize(i["經費項目"] || "").includes("材料費"))
+                                      .reduce((sum, i) => sum + (Number(i["小計"]) || 0), 0);
+                    return val > 0 ? val : "";
+                }
+                if (nh === "核定業務費") {
+                    const val = details.filter(i => normalize(i["經費項目"] || "").includes("材料費"))
+                                      .reduce((sum, i) => sum + (Number(i["小計"]) || 0), 0);
+                    return val > 0 ? val : "";
+                }
+            }
+
+            // 萬用模糊匹配
+            for (let key in flat) {
+                if (normalize(key) === nh) return flat[key];
+            }
+
+            return "";
+        };
+
+        // --- 檔案上傳事件 ---
+        const handleTemplate = (file) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(sheet, {header: 1});
+                    state.templateHeaders = json[0] || [];
+                    elements.tempName.innerText = file.name;
+                    elements.tempName.className = "text-xs font-bold text-teal-600";
+                    // 更新歷史列表頭
+                    elements.histHead.innerHTML = state.templateHeaders.map(h => `<th class="p-3 whitespace-nowrap">${h.replace(/\n/g, ' ')}</th>`).join('');
+                    checkReady();
+                } catch (err) { showError("Excel 範本讀取失敗，請確認格式。"); }
+            };
+            reader.readAsArrayBuffer(file);
+        };
+
+        const handleSource = (file) => {
+            state.sourceFile = file;
+            elements.srcName.innerText = file.name;
+            elements.srcName.className = "text-xs font-bold text-teal-600";
+            checkReady();
+        };
+
+        elements.tempIn.onchange = (e) => handleTemplate(e.target.files[0]);
+        elements.srcIn.onchange = (e) => handleSource(e.target.files[0]);
+        document.getElementById('template-drop').onclick = () => elements.tempIn.click();
+        document.getElementById('source-drop').onclick = () => elements.srcIn.click();
+
+        // --- AI API 互動 ---
+        const callAI = async (base64, mimeType) => {
+            const prompt = "請辨識此專案申請表，並提取以下資訊：申請教師、所屬學院、所屬學系、課程名稱、人事代碼、課程代碼、Email、以及『申請經費預算』表格中的所有項目與小計金額。請以 JSON 格式輸出。";
+            
+            for (let i = 0; i < 5; i++) {
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${state.apiKey}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [
+                                    { text: prompt },
+                                    { inlineData: { mimeType: mimeType, data: base64 } }
+                                ]
+                            }],
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    });
+                    if (!response.ok) throw new Error("AI 伺服器忙碌，正在重試...");
+                    const result = await response.json();
+                    let raw = result.candidates[0].content.parts[0].text;
+                    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+                    if (!jsonMatch) throw new Error("解析 AI 回傳格式失敗");
+                    return JSON.parse(jsonMatch[0]);
+                } catch (err) {
+                    if (i === 4) throw err;
+                    await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+                }
+            }
+        };
+
+        elements.btnProcess.onclick = async () => {
+            elements.loader.classList.remove('hidden');
+            elements.placeholder.classList.add('hidden');
+            elements.resultView.classList.remove('hidden');
+            elements.mappingBody.innerHTML = '<tr><td colspan="3" class="p-12 text-center text-slate-400 italic animate-pulse">AI 正在深度解析文件內容並計算經費報表...</td></tr>';
+
+            const reader = new FileReader();
+            reader.onload = async () => {
+                const base64 = reader.result.split(',')[1];
+                const mime = state.sourceFile.type || 'application/pdf';
+                try {
+                    state.aiResult = await callAI(base64, mime);
+                    state.flattenedData = flattenObject(state.aiResult);
+                    renderMappingTable();
+                } catch (err) {
+                    showError(`辨識中斷: ${err.message}`);
+                    elements.mappingBody.innerHTML = `<tr><td colspan="3" class="p-12 text-center text-red-500 font-bold">⚠️ 辨識失敗，請檢查 API Key 或網路狀況。</td></tr>`;
+                } finally {
+                    elements.loader.classList.add('hidden');
+                }
+            };
+            reader.readAsDataURL(state.sourceFile);
+        };
+
+        const renderMappingTable = () => {
+            let html = "";
+            state.templateHeaders.forEach(h => {
+                const val = getMappedValue(h, state.flattenedData);
+                html += `
+                    <tr class="border-b border-slate-50 transition-colors hover:bg-slate-50/50">
+                        <td class="p-4 font-bold text-slate-600 bg-slate-50/30 w-1/3 text-xs">${h.replace(/\n/g, ' ')}</td>
+                        <td class="p-4">
+                            <input type="text" data-header="${h}" value="${val}" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-teal-500 text-teal-900 font-semibold shadow-sm transition-all">
+                        </td>
+                        <td class="p-4 text-center">
+                            <span class="inline-flex items-center justify-center h-6 w-6 rounded-full ${val ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-600 animate-pulse'} text-[10px] font-bold">
+                                ${val ? '✓' : '!'}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+            elements.mappingBody.innerHTML = html;
+        };
+
+        // --- 清單與匯出管理 ---
+        elements.btnAdd.onclick = () => {
+            const row = {};
+            elements.mappingBody.querySelectorAll('input').forEach(input => {
+                row[input.getAttribute('data-header')] = input.value;
+            });
+            state.processedRecords.push(row);
+            
+            elements.recordCount.innerText = state.processedRecords.length;
+            renderHistoryList();
+            resetWorkspace();
+            updateChart();
+        };
+
+        const renderHistoryList = () => {
+            elements.btnExport.disabled = false;
+            elements.btnExport.className = "px-6 py-2 bg-teal-600 text-white font-bold rounded-lg shadow-lg shadow-teal-100 cursor-pointer hover:bg-teal-700 transition-all";
+            
+            elements.histBody.innerHTML = state.processedRecords.map(rec => `
+                <tr class="hover:bg-slate-50 border-b border-slate-50">
+                    ${state.templateHeaders.map(h => `<td class="p-3 max-w-[120px] truncate text-slate-600">${rec[h] || ''}</td>`).join('')}
+                </tr>
+            `).join('');
+        };
+
+        const resetWorkspace = () => {
+            state.sourceFile = null;
+            elements.srcName.innerText = "拖放下一筆檔案至此";
+            elements.srcName.className = "text-xs text-slate-400";
+            elements.resultView.classList.add('hidden');
+            elements.placeholder.classList.remove('hidden');
+            checkReady();
+        };
+
+        elements.btnCancel.onclick = resetWorkspace;
+
+        elements.btnExport.onclick = () => {
+            const ws = XLSX.utils.json_to_sheet(state.processedRecords, {header: state.templateHeaders});
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "核定彙整清單");
+            XLSX.writeFile(wb, `課程補助專案_批次匯出_${new Date().getTime()}.xlsx`);
+            
+            if(confirm("Excel 下載成功！是否要清空目前的批次清單開始新工作？")) {
+                state.processedRecords = [];
+                elements.recordCount.innerText = "0";
+                elements.histBody.innerHTML = '<tr><td colspan="100%" class="p-10 text-center text-slate-300 italic">清單目前為空</td></tr>';
+                elements.btnExport.disabled = true;
+                elements.btnExport.className = "px-6 py-2 bg-stone-100 text-stone-400 font-bold rounded-lg cursor-not-allowed";
+                updateChart();
+            }
+        };
+
+        const updateChart = () => {
+            const ctx = document.getElementById('batchChart').getContext('2d');
+            if (window.myChart) window.myChart.destroy();
+            const count = state.processedRecords.length;
+            window.myChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['已處理筆數', '剩餘建議空間'],
+                    datasets: [{
+                        data: [count, Math.max(0, 100 - count)],
+                        backgroundColor: ['#0d9488', '#f1f5f9'],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: { cutout: '85%', maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        };
+
+        window.onload = updateChart;
+    </script>
+</body>
+</html>
