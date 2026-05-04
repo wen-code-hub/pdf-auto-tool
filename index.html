@@ -338,12 +338,12 @@
         const callAI = async (base64, mimeType) => {
             const prompt = "請辨識此專案申請表，並提取以下資訊：申請教師、所屬學院、所屬學系、課程名稱、人事代碼、課程代碼、Email、以及『申請經費預算』表格中的所有項目與小計金額。請以 JSON 格式輸出。";
             
-            for (let i = 0; i < 5; i++) {
+            for (let i = 0; i < 1  ; i++) {
                 try {
                     // --- 替換第 285 行開始的 fetch 區塊 ---
                     // --- 建議替換第 285 行開始的 fetch 區塊 ---
                     // 請直接複製這兩行，替換掉原本的 url 定義與印出語句
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${encodeURIComponent(state.apiKey)}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(state.apiKey)}`;
                     console.log("Debug - 完整發送網址:", url);
 
                     // 資管系除錯心法：在發出前先列印出來檢查
