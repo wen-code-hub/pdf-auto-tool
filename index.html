@@ -367,6 +367,11 @@
         };
 
         elements.btnProcess.onclick = async () => {
+                    if (!state.apiKey) {
+                const userKey = prompt("請輸入您的 Gemini API Key 以開始辨識：");
+                if (!userKey) return; // 如果沒輸入就取消執行
+                state.apiKey = userKey;
+            }
             elements.loader.classList.remove('hidden');
             elements.placeholder.classList.add('hidden');
             elements.resultView.classList.remove('hidden');
